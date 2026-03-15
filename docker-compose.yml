@@ -1,0 +1,94 @@
+# ============================================
+# DataFlow ETL Pipeline - Docker Compose
+# Multi-service architecture with scheduling
+# Author: Kumar Harsh
+# ============================================
+
+version: "3.9"
+
+services:
+  # ---- ETL Pipeline (One-time run) ----
+  etl-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: dataflow-etl
+    restart: "no"
+    volumes:
+      - pipeline-data:/app/data
+      - pipeline-logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Kolkata
+    networks:
+      - dataflow-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # ---- Scheduled ETL (Runs every 6 hours) ----
+  etl-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: dataflow-scheduler
+    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c "
+        echo '⏰ DataFlow Scheduler started - runs every 6 hours';
+        while true; do
+          echo '🔄 Running ETL pipeline...';
+          python etl_pipeline.py;
+          echo '😴 Sleeping for 6 hours...';
+          sleep 21600;
+        done
+      "
+    volumes:
+      - pipeline-data:/app/data
+      - pipeline-logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Kolkata
+    networks:
+      - dataflow-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---- Data Viewer (SQLite Web UI) ----
+  data-viewer:
+    image: coleifer/sqlite-web
+    container_name: dataflow-viewer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - pipeline-data:/data:ro
+    environment:
+      - SQLITE_DATABASE=/data/dataflow.db
+    networks:
+      - dataflow-net
+    depends_on:
+      - etl-pipeline
+
+volumes:
+  pipeline-data:
+    driver: local
+    name: dataflow-pipeline-data
+  pipeline-logs:
+    driver: local
+    name: dataflow-pipeline-logs
+
+networks:
+  dataflow-net:
+    driver: bridge
+    name: dataflow-network
